@@ -107,6 +107,8 @@ type Config struct {
 	WhitelistIPs				[]string	`yaml:"whitelistIPs,omitempty"`
 	AgentAllow 					[]string 	`json:"agentAllow,omitempty"`
 	AgentDeny					[]string 	`json:"agentDeny,omitempty"`
+	QueryParam					bool		`json:"bearerHeader,omitempty"`
+	QueryParamName				string      `json:"queryParamName,omitempty"`
 }
 
 /*
@@ -144,6 +146,8 @@ func CreateConfig() *Config {
 		WhitelistIPs:				make([]string, 0),
 		AgentAllow: 				make([]string, 0),
 		AgentDeny: 					make([]string, 0),
+		QueryParam:                 false,
+		QueryParamName:             "auth",
 	}
 }
 
@@ -164,6 +168,8 @@ type KeyAuth struct {
 	whitelistIPs    			[]net.IP
 	regexpsAllow 				[]*regexp.Regexp
 	regexpsDeny  				[]*regexp.Regexp
+	queryParam					bool
+	queryParamName				string
 }
 
 /*
@@ -215,7 +221,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	/*
 		@TODO		merge logs
-	*/
+ */
 
 	logInfo.SetFlags(0)
 	logInfo.SetOutput(new(logWriter))
@@ -313,6 +319,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		internalErrorRoute:			config.InternalErrorRoute,
 		regexpsAllow: 				regexpsAllow,
 		regexpsDeny:  				regexpsDeny,
+		queryParam: 				config.QueryParam,
+		queryParamName:				config.QueryParamName,
 	}, nil
 }
 
@@ -513,6 +521,23 @@ func (ka *KeyAuth) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			}
 
 			if ( len(ka.regexpsAllow) > 0 && bRegexWhitelist ) || ( !bRegexBlacklist ) {
+				ka.next.ServeHTTP(rw, req)
+				return
+			}
+		}
+	}
+
+	/*
+		Query Param > check for valid token
+	*/
+	if ka.queryParam {
+		if val := req.URL.Query().Get(ka.queryParamName); val != "" {
+			if sliceString(val, ka.tokens) {
+				if ka.removeHeadersOnSuccess {
+					q := req.URL.Query()
+					q.Del(ka.queryParamName)
+					req.URL.RawQuery = q.Encode()
+				}
 				ka.next.ServeHTTP(rw, req)
 				return
 			}
